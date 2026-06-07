@@ -9,6 +9,12 @@ class WorkspacesApp {
         this.currentMode = null;
         this.isDarkMode = false;
         this.workspaceData = {};
+        this.drawState = {
+            isDrawing: false,
+            tool: 'pen',
+            color: '#000000',
+            brushSize: 3
+        };
 
         this.init();
     }
@@ -225,7 +231,7 @@ class WorkspacesApp {
         const dataTemplates = {
             kanban: { columns: { todo: [], doing: [], done: [] } },
             notes: { notes: [] },
-            draw: { canvas: null },
+            draw: { imageData: null },
             'text-editor': { content: '' },
             coding: { content: '', language: 'txt' },
             flow: { nodes: [] }
@@ -299,6 +305,9 @@ class WorkspacesApp {
             (columns[columnName] || []).forEach((card, idx) => {
                 const cardEl = document.createElement('div');
                 cardEl.className = 'kanban-card';
+                cardEl.draggable = true;
+                cardEl.setAttribute('data-column', columnName);
+                cardEl.setAttribute('data-index', idx);
                 cardEl.innerHTML = `
                     <div class="kanban-card-title">${this.escapeHtml(card.title)}</div>
                     ${card.description ? `<div class="kanban-card-description">${this.escapeHtml(card.description)}</div>` : ''}
@@ -308,17 +317,56 @@ class WorkspacesApp {
                 cardEl.querySelector('.kanban-card-menu').addEventListener('click', () => {
                     this.showKanbanCardMenu(tab.id, columnName, idx);
                 });
+
+                cardEl.addEventListener('dragstart', (e) => {
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('cardData', JSON.stringify({ columnName, idx }));
+                });
                 
                 cardsContainer.appendChild(cardEl);
             });
         });
 
-        // Add column context menu
+        // Add column context menu and drag handlers
         workspace.querySelectorAll('.kanban-column').forEach(column => {
             column.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
                 const columnName = column.getAttribute('data-column');
                 this.showAddCardMenu(tab.id, columnName);
+            });
+
+            column.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                column.style.opacity = '0.8';
+            });
+
+            column.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                column.style.opacity = '1';
+            });
+
+            column.addEventListener('drop', (e) => {
+                e.preventDefault();
+                column.style.opacity = '1';
+                
+                try {
+                    const cardData = JSON.parse(e.dataTransfer.getData('cardData'));
+                    const fromColumn = cardData.columnName;
+                    const fromIndex = cardData.idx;
+                    const toColumn = column.getAttribute('data-column');
+
+                    if (!tab.data.columns) tab.data.columns = { todo: [], doing: [], done: [] };
+                    
+                    const card = tab.data.columns[fromColumn][fromIndex];
+                    tab.data.columns[fromColumn].splice(fromIndex, 1);
+                    tab.data.columns[toColumn].push(card);
+                    
+                    this.renderWorkspace();
+                    this.saveProject();
+                } catch (err) {
+                    console.error('Drag error:', err);
+                }
             });
         });
     }
@@ -391,8 +439,19 @@ class WorkspacesApp {
         noteEl.style.top = note.y + 'px';
         noteEl.style.width = note.width + 'px';
         noteEl.style.height = note.height + 'px';
+        noteEl.contentEditable = true;
         noteEl.textContent = note.content;
         noteEl.draggable = true;
+
+        // Update content on input
+        noteEl.addEventListener('input', () => {
+            note.content = noteEl.textContent;
+            const tab = this.tabs.find(t => t.id === tabId);
+            if (tab) {
+                tab.data.notes[idx].content = noteEl.textContent;
+                this.saveProject();
+            }
+        });
 
         let isDragging = false;
         let offsetX = 0;
@@ -402,6 +461,7 @@ class WorkspacesApp {
             isDragging = true;
             offsetX = e.clientX - noteEl.offsetLeft;
             offsetY = e.clientY - noteEl.offsetTop;
+            e.dataTransfer.effectAllowed = 'move';
         });
 
         document.addEventListener('dragend', () => {
@@ -413,6 +473,13 @@ class WorkspacesApp {
                 e.preventDefault();
                 noteEl.style.left = (e.clientX - offsetX) + 'px';
                 noteEl.style.top = (e.clientY - offsetY) + 'px';
+                
+                const tab = this.tabs.find(t => t.id === tabId);
+                if (tab) {
+                    tab.data.notes[idx].x = e.clientX - offsetX;
+                    tab.data.notes[idx].y = e.clientY - offsetY;
+                    this.saveProject();
+                }
             }
         });
 
@@ -431,10 +498,10 @@ class WorkspacesApp {
         if (!tab.data.notes) tab.data.notes = [];
 
         tab.data.notes.push({
-            content: '',
+            content: 'Click to edit...',
             color: '#ffeb3b',
-            x: x - 150,
-            y: y - 75,
+            x: Math.max(0, x - 100),
+            y: Math.max(0, y - 75),
             width: 200,
             height: 200
         });
@@ -481,6 +548,7 @@ class WorkspacesApp {
                 </div>
                 <div class="draw-canvas-area">
                     <canvas class="draw-canvas"></canvas>
+                    <input type="range" class="brush-size-slider" min="1" max="50" value="3" style="position: absolute; bottom: 10px; left: 70px;">
                 </div>
                 <div class="draw-color-picker">
                     <div class="color-option" data-color="#000000" style="background-color: #000000;"></div>
@@ -488,20 +556,140 @@ class WorkspacesApp {
                     <div class="color-option" data-color="#00FF00" style="background-color: #00FF00;"></div>
                     <div class="color-option" data-color="#0000FF" style="background-color: #0000FF;"></div>
                     <div class="color-option" data-color="#FFFF00" style="background-color: #FFFF00;"></div>
-                    <button class="toolbar-btn" onclick="alert('Color picker coming soon!')">🎨</button>
+                    <div class="color-option" data-color="#FFFFFF" style="background-color: #FFFFFF; border: 2px solid #999;"></div>
                 </div>
             </div>
         `;
 
         const canvas = workspace.querySelector('.draw-canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Set canvas size
         canvas.width = canvas.offsetWidth;
         canvas.height = canvas.offsetHeight;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg-primary');
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Load previous image if exists
+        if (tab.data.imageData) {
+            const img = new Image();
+            img.onload = () => ctx.drawImage(img, 0, 0);
+            img.src = tab.data.imageData;
+        } else {
+            ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg-primary').trim() || '#fff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        this.drawState.tool = 'pen';
+        this.drawState.color = '#000000';
+        this.drawState.brushSize = 3;
+
+        // Tool selection
+        workspace.querySelectorAll('.draw-tool').forEach(tool => {
+            tool.addEventListener('click', () => {
+                workspace.querySelectorAll('.draw-tool').forEach(t => t.classList.remove('active'));
+                tool.classList.add('active');
+                this.drawState.tool = tool.getAttribute('data-tool');
+            });
+        });
 
         workspace.querySelector('[data-tool="pen"]').classList.add('active');
+
+        // Color selection
+        workspace.querySelectorAll('.color-option').forEach(color => {
+            color.addEventListener('click', () => {
+                workspace.querySelectorAll('.color-option').forEach(c => c.classList.remove('active'));
+                color.classList.add('active');
+                this.drawState.color = color.getAttribute('data-color');
+            });
+        });
+
         workspace.querySelector('[data-color="#000000"]').classList.add('active');
+
+        // Brush size slider
+        const sizeSlider = workspace.querySelector('.brush-size-slider');
+        sizeSlider.addEventListener('input', (e) => {
+            this.drawState.brushSize = e.target.value;
+        });
+
+        // Drawing logic
+        let isDrawing = false;
+        let startX, startY;
+
+        canvas.addEventListener('mousedown', (e) => {
+            isDrawing = true;
+            const rect = canvas.getBoundingClientRect();
+            startX = e.clientX - rect.left;
+            startY = e.clientY - rect.top;
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDrawing) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            ctx.strokeStyle = this.drawState.color;
+            ctx.fillStyle = this.drawState.color;
+            ctx.lineWidth = this.drawState.brushSize;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            switch (this.drawState.tool) {
+                case 'pen':
+                    ctx.beginPath();
+                    ctx.moveTo(startX, startY);
+                    ctx.lineTo(x, y);
+                    ctx.stroke();
+                    startX = x;
+                    startY = y;
+                    break;
+                case 'eraser':
+                    ctx.clearRect(x - this.drawState.brushSize / 2, y - this.drawState.brushSize / 2, this.drawState.brushSize, this.drawState.brushSize);
+                    break;
+            }
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (!isDrawing) return;
+            isDrawing = false;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            ctx.strokeStyle = this.drawState.color;
+            ctx.fillStyle = this.drawState.color;
+            ctx.lineWidth = this.drawState.brushSize;
+
+            switch (this.drawState.tool) {
+                case 'line':
+                    ctx.beginPath();
+                    ctx.moveTo(startX, startY);
+                    ctx.lineTo(x, y);
+                    ctx.stroke();
+                    break;
+                case 'square':
+                    ctx.strokeRect(startX, startY, x - startX, y - startY);
+                    break;
+                case 'circle':
+                    const radius = Math.sqrt(Math.pow(x - startX, 2) + Math.pow(y - startY, 2));
+                    ctx.beginPath();
+                    ctx.arc(startX, startY, radius, 0, 2 * Math.PI);
+                    ctx.stroke();
+                    break;
+                case 'fill':
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    break;
+            }
+
+            // Save image data
+            tab.data.imageData = canvas.toDataURL();
+            this.saveProject();
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            isDrawing = false;
+        });
     }
 
     // ========================================================================
@@ -516,18 +704,38 @@ class WorkspacesApp {
                     <button class="toolbar-btn" data-format="underline">Underline</button>
                     <button class="toolbar-btn" data-format="list">Unordered List</button>
                     <button class="toolbar-btn" data-format="num-list">Numbered List</button>
-                    <button class="toolbar-btn" data-format="color">Color</button>
                 </div>
-                <textarea class="text-editor" placeholder="Start typing..."></textarea>
+                <textarea class="text-editor" placeholder="Start typing..." style="white-space: pre-wrap;"></textarea>
             </div>
         `;
 
         const textarea = workspace.querySelector('.text-editor');
         textarea.value = tab.data.content || '';
+        textarea.style.userSelect = 'text';
+        textarea.style.WebkitUserSelect = 'text';
 
         textarea.addEventListener('input', () => {
             tab.data.content = textarea.value;
             this.saveProject();
+        });
+
+        // Simple formatting (just text-based for simplicity)
+        workspace.querySelectorAll('.toolbar-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const format = btn.getAttribute('data-format');
+                let text = textarea.value;
+                
+                if (format === 'list') {
+                    text += '\n• ';
+                } else if (format === 'num-list') {
+                    text += '\n1. ';
+                }
+                
+                textarea.value = text;
+                tab.data.content = text;
+                this.saveProject();
+                textarea.focus();
+            });
         });
     }
 
@@ -548,9 +756,9 @@ class WorkspacesApp {
                         <option value="java">.java</option>
                         <option value="cpp">.cpp</option>
                     </select>
-                    <button class="toolbar-btn" onclick="alert('Save functionality coming soon!')">💾 Save</button>
+                    <button class="toolbar-btn" id="downloadCodeBtn">💾 Download</button>
                 </div>
-                <textarea class="code-editor" placeholder="Write your code here..." spellcheck="false"></textarea>
+                <textarea class="code-editor" placeholder="Write your code here..." spellcheck="false" style="white-space: pre;"></textarea>
             </div>
         `;
 
@@ -568,6 +776,23 @@ class WorkspacesApp {
             tab.data.language = fileType.value;
             this.saveProject();
         });
+
+        // Download button
+        document.getElementById('downloadCodeBtn').addEventListener('click', () => {
+            const content = textarea.value;
+            const language = fileType.value;
+            const filename = `code.${language}`;
+            
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        });
     }
 
     // ========================================================================
@@ -584,6 +809,34 @@ class WorkspacesApp {
             nodeEl.style.left = node.x + 'px';
             nodeEl.style.top = node.y + 'px';
             nodeEl.textContent = node.label;
+            nodeEl.draggable = true;
+            nodeEl.setAttribute('data-index', idx);
+
+            let isDragging = false;
+            let offsetX = 0;
+            let offsetY = 0;
+
+            nodeEl.addEventListener('dragstart', (e) => {
+                isDragging = true;
+                offsetX = e.clientX - nodeEl.offsetLeft;
+                offsetY = e.clientY - nodeEl.offsetTop;
+                e.dataTransfer.effectAllowed = 'move';
+            });
+
+            document.addEventListener('dragend', () => {
+                isDragging = false;
+            });
+
+            document.addEventListener('dragover', (e) => {
+                if (isDragging && e.target === flowArea) {
+                    e.preventDefault();
+                    nodeEl.style.left = (e.clientX - offsetX) + 'px';
+                    nodeEl.style.top = (e.clientY - offsetY) + 'px';
+                    tab.data.nodes[idx].x = e.clientX - offsetX;
+                    tab.data.nodes[idx].y = e.clientY - offsetY;
+                }
+            });
+
             flowArea.appendChild(nodeEl);
         });
 
