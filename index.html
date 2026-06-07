@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workspaces - Productivity Web App</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Top Navigation with Tabs -->
+        <div class="top-nav">
+            <div class="tabs-container">
+                <div class="tabs" id="tabsContainer"></div>
+                <button class="add-tab-btn" id="addTabBtn">+</button>
+            </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <!-- Left Sidebar - Mode Selection -->
+            <aside class="left-sidebar">
+                <div class="sidebar-header">Modes</div>
+                <nav class="mode-list">
+                    <div class="mode-item" data-mode="kanban">
+                        <div class="mode-icon">📊</div>
+                        <div class="mode-name">Kanban</div>
+                    </div>
+                    <div class="mode-item" data-mode="notes">
+                        <div class="mode-icon">📝</div>
+                        <div class="mode-name">Notes</div>
+                    </div>
+                    <div class="mode-item" data-mode="draw">
+                        <div class="mode-icon">🎨</div>
+                        <div class="mode-name">Draw</div>
+                    </div>
+                    <div class="mode-item" data-mode="text-editor">
+                        <div class="mode-icon">✏️</div>
+                        <div class="mode-name">Text Editor</div>
+                    </div>
+                    <div class="mode-item" data-mode="coding">
+                        <div class="mode-icon">💻</div>
+                        <div class="mode-name">Coding</div>
+                    </div>
+                    <div class="mode-item" data-mode="flow">
+                        <div class="mode-icon">🔄</div>
+                        <div class="mode-name">Flow</div>
+                    </div>
+                </nav>
+            </aside>
+
+            <!-- Workspace Area -->
+            <div class="workspace" id="workspace"></div>
+
+            <!-- Right Sidebar - Mode Info & AI Assistant -->
+            <aside class="right-sidebar">
+                <div class="right-sidebar-header">
+                    <button class="ai-toggle-btn" id="aiToggleBtn">🤖 AI Assistant</button>
+                    <button class="theme-toggle-btn" id="themeToggleBtn">☀️</button>
+                </div>
+
+                <!-- Mode Description Panel -->
+                <div class="mode-description-panel" id="modeDescriptionPanel">
+                    <div class="description-content" id="descriptionContent">
+                        <p>Select a mode to get started</p>
+                    </div>
+                    <button class="go-to-workspace-btn" id="goToWorkspaceBtn">Go to workspace mode</button>
+                </div>
+
+                <!-- AI Assistant Panel (Hidden by default) -->
+                <div class="ai-assistant-panel" id="aiAssistantPanel" style="display: none;">
+                    <div class="ai-header">AI Assistant</div>
+                    <div class="ai-chat" id="aiChat"></div>
+                    <div class="ai-input-area">
+                        <input type="text" id="aiInput" placeholder="Ask me anything..." class="ai-input">
+                        <button class="ai-send-btn" id="aiSendBtn">Send</button>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
